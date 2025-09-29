@@ -1,0 +1,132 @@
+/* Simplified centered login */
+:root {
+  --brand-primary: #4c63d2;
+  --brand-primary-hover: #3d54c0;
+  --surface: #fff;
+  --surface-border: #d0d5dd;
+  --text-primary: #222;
+  --text-secondary: #667085;
+  --focus: #4c63d2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1f2430;
+    --surface-border: #313b48;
+    --text-primary: #f2f4f7;
+    --text-secondary: #9ca6b5;
+    --brand-primary: #6c82ff;
+    --brand-primary-hover: #5a71ea;
+    --focus: #6c82ff;
+  }
+}
+
+/* Removed full-screen gradient; container now just centers content with neutral background */
+.login-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.25rem;
+  flex: 1;
+}
+
+.login-panel {
+  background: #f5f6f8;
+  border: 1px solid #e2e5ea;
+  border-radius: 14px;
+  padding: 2.5rem 2.25rem;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  max-width: 640px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .04) inset;
+}
+
+@media (prefers-color-scheme: dark) {
+  .login-panel {
+    background: #232a34;
+    border-color: #313b48;
+  }
+}
+
+.login-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: 8px;
+  padding: 2rem 1.75rem 1.75rem;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .06);
+}
+
+.login-card h1 {
+  margin: 0 0 1.25rem;
+  font-size: 1.6rem;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-primary);
+  letter-spacing: .2px;
+}
+
+.login-subtext {
+  text-align: center;
+  margin: -0.5rem 0 1.4rem;
+  font-size: .8rem;
+  color: var(--text-secondary);
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  font-weight: 500;
+  font-size: .8rem;
+  color: var(--text-secondary);
+  display: block;
+  margin-bottom: .35rem;
+}
+
+.input-wrapper input {
+  width: 100%;
+  padding: .6rem .7rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: .9rem;
+  transition: border-color .12s;
+}
+
+.input-wrapper input:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-color: var(--focus);
+}
+
+.input-wrapper input::placeholder {
+  color: var(--text-secondary);
+  opacity: .55;
+}
+
+button.login-btn {
+  width: 100%;
+  background: var(--brand-primary);
+  color: #fff;
+  padding: .7rem .9rem;
+  font-size: .95rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s;
+}
+
+button.login-btn:hover:not(:disabled) {
+  background: var(--brand-primary-hover);
+}
+
+button.login-btn:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}

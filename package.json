@@ -1,0 +1,8 @@
+{
+    "name": "cfg_evals-root",
+    "private": true,
+    "workspaces": [
+        "client"
+    ],
+    "license": "UNLICENSED"
+}

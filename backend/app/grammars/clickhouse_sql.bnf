@@ -1,0 +1,132 @@
+################################################################################################
+# CFG: Restricted ClickHouse SQL for table default.MOCK_DATA
+# Goal: Constrain GPT-5 output (per OpenAI CFG cookbook concepts) to vetted, readonly SELECT queries.
+# Safety Strategies:
+#  - Only SELECT allowed (no INSERT/ALTER/DDL, no subqueries, no JOINs)
+#  - Whitelisted column names & functions
+#  - Limited boolean logic (AND / OR) with explicit precedence
+#  - Arithmetic expressions restricted to numeric columns inside projections & HAVING
+#  - CASE expressions only simple form (searched CASE with comparisons) returning string or number literals
+#  - Date/time functions limited to truncation (toHour, toDay, toDate) applied to DateTime columns
+#  - No arbitrary function names; no user-supplied identifiers beyond alias pattern
+#  - IN lists restricted to scalar literals
+#  - Relative time strictly <integer> <UNIT> AGO
+#  - HAVING only aggregate comparisons vs numeric literal
+# Table Columns:
+#   id UInt32, name String, email String, age Int64, signup_date DateTime,
+#   country String, is_active Bool, subscription_plane String, last_login DateTime, balance Int64
+# Extensions added in this version:
+#   * Arithmetic: sum(balance) / count(*), age + 5, balance - 100 (only + - / allowed; no nesting of parentheses beyond single level)
+#   * Date truncation: toHour(last_login), toDay(signup_date)
+#   * CASE: CASE WHEN <comparison> THEN <scalar> (WHEN ...)* ELSE <scalar> END (restricted forms) with optional alias
+#   * OR logic: conditions now support OR with precedence (AND binds tighter than OR)
+#   * ORDER BY can reference function or CASE alias already projected
+################################################################################################
+
+query ::= select_stmt ;
+
+# Core select shape: SELECT <projection> FROM default.MOCK_DATA <clauses>
+select_stmt ::= "SELECT" ws select_list ws "FROM" ws table_name where_clause? group_clause? having_clause? order_clause? limit_clause? ;
+
+table_name ::= "default" "." "MOCK_DATA" | "MOCK_DATA" ;
+
+# Projections
+select_list ::= projection (ws? "," ws? projection)* ;
+projection ::= named_projection | arithmetic_expr | column_ref | aggregate_expr | case_expr | date_trunc_expr | "*" ;
+
+named_projection ::= (aggregate_expr | arithmetic_expr | date_trunc_expr | case_expr | column_ref) ws? "AS" ws? alias ;
+
+aggregate_expr ::= func_name "(" ws? agg_arg ws? ")" ;
+agg_arg ::= column_ref | "*" ;
+func_name ::= "count" | "sum" | "avg" | "min" | "max" ;
+alias ::= ident ;
+
+# Arithmetic (only + - / allowed, left-associative, limited depth)
+arithmetic_expr ::= arithmetic_term (ws? arith_op ws? arithmetic_term)* ;
+arithmetic_term ::= numeric_leaf ;
+numeric_leaf ::= aggregate_expr | numeric_column | number_literal ;
+numeric_column ::= "age" | "balance" | "id" ;
+arith_op ::= "+" | "-" | "/" ;
+
+# Date truncation (whitelisted)
+date_trunc_expr ::= date_trunc_func "(" ws? dt_column ws? ")" ;
+date_trunc_func ::= "toHour" | "toDay" | "toDate" ;
+dt_column ::= "signup_date" | "last_login" ;
+
+# CASE expression (searched CASE; comparisons only; THEN & ELSE scalar literals)
+case_expr ::= "CASE" ws case_when_clause+ case_else_clause? ws "END" ;
+case_when_clause ::= "WHEN" ws comparison ws "THEN" ws scalar_value ws? ;
+case_else_clause ::= "ELSE" ws scalar_value ;
+
+# Columns (limited to known schema)
+column_ref ::= "id" | "name" | "email" | "age" | "signup_date" | "country" | "is_active" | "subscription_plane" | "last_login" | "balance" ;
+
+#############################
+# Boolean Logic (AND / OR)
+# Precedence: AND > OR (implemented via grammar layering)
+#############################
+where_clause ::= ws "WHERE" ws or_expr ;
+or_expr ::= and_expr (ws "OR" ws and_expr)* ;
+and_expr ::= base_condition (ws "AND" ws base_condition)* ;
+base_condition ::= comparison | between_time | time_range | bool_is | in_list | like_condition | paren_cond ;
+paren_cond ::= "(" ws? or_expr ws? ")" ;
+
+comparison ::= column_ref ws comp_op ws scalar_value ;
+comp_op ::= "=" | "!=" | ">" | ">=" | "<" | "<=" ;
+
+between_time ::= column_ref ws "BETWEEN" ws datetime_literal ws "AND" ws datetime_literal ;
+time_range ::= column_ref ws range_op ws relative_time ;
+range_op ::= ">=" | ">" | "<=" | "<" ;
+
+bool_is ::= column_ref ws "=" ws bool_literal ;
+bool_literal ::= "true" | "false" ;
+
+in_list ::= column_ref ws "IN" ws "(" ws? scalar_value (ws? "," ws? scalar_value)* ws? ")" ;
+
+scalar_value ::= number_literal | string_literal ;
+
+number_literal ::= [0-9]+ ;
+string_literal ::= "'" ([^'\\]|\\.)* "'" ;
+
+# LIKE / ILIKE pattern matching (prefix / suffix / contains)
+# We constrain patterns to have optional leading/trailing % but not internal wildcard explosion to reduce risk.
+like_condition ::= column_ref ws like_op ws pattern_literal ;
+like_op ::= "LIKE" | "ILIKE" ;
+# pattern_literal reuses string_literal syntax but model guidance discourages multiple internal %.
+pattern_literal ::= string_literal ;
+
+# Guidance examples for the model (not part of grammar, purely comments):
+#   name ILIKE 'A%'
+#   name ILIKE '%ali%'
+#   name ILIKE '%son'
+# Combine with LIMIT when user asks for "first N" or "top N":
+#   SELECT * FROM default.MOCK_DATA WHERE name ILIKE 'A%' LIMIT 10
+
+# Relative time referencing (e.g., last_login >= 30 HOURS AGO)
+relative_time ::= integer ws time_unit ws "AGO" ;
+integer ::= [0-9]+ ;
+time_unit ::= "HOUR" | "HOURS" | "DAY" | "DAYS" | "MINUTE" | "MINUTES" ;
+
+datetime_literal ::= "'" [0-9]{4} "-" [0-9]{2} "-" [0-9]{2} ws [0-9]{2} ":" [0-9]{2} ":" [0-9]{2} "'" ;
+
+# GROUP BY / HAVING
+group_clause ::= ws "GROUP" ws "BY" ws group_list ;
+group_list ::= column_ref (ws? "," ws? column_ref)* ;
+
+having_clause ::= ws "HAVING" ws having_condition ;
+having_condition ::= having_metric ws having_comp_op ws number_literal ;
+having_metric ::= aggregate_expr | arithmetic_expr ;
+having_comp_op ::= ">" | ">=" | "<" | "<=" | "=" | "!=" ;
+
+# ORDER BY (only simple column or aggregate alias, ASC/DESC optional)
+order_clause ::= ws "ORDER" ws "BY" ws order_list ;
+order_list ::= order_item (ws? "," ws? order_item)* ;
+order_item ::= (column_ref | alias) ws? order_dir? ;
+order_dir ::= "ASC" | "DESC" ;
+
+limit_clause ::= ws "LIMIT" ws integer (ws "," ws integer)? ;  # Optional OFFSET form supported via two integers
+
+# Identifiers (for aliases)
+ident ::= [a-zA-Z_][a-zA-Z0-9_]* ;
+
+ws ::= [ \t\n\r]+ ;
