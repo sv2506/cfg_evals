@@ -10,7 +10,7 @@ const App: React.FC = () => {
   const [userEmail, setUserEmail] = useState<string>("");
   return (
     <BrowserRouter>
-      <div className="app-layout">
+      <div className={`app-layout ${authed ? "with-sidebar" : ""}`}>
         {authed && (
           <Navbar
             onLogout={() => {

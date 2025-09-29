@@ -45,10 +45,14 @@
 .main-content {
   flex: 1;
   padding: 1.5rem;
-  margin-left: 200px; /* account for fixed sidebar */
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/* When sidebar present, add offset */
+.with-sidebar .main-content {
+  margin-left: 200px;
 }
 
 /* Shared page inner wrapper ensuring extra spacing from sidebar */

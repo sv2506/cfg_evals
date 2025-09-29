@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useRef } from "react";
 
 const Query: React.FC = () => {
   const [text, setText] = useState("");
@@ -58,6 +58,8 @@ const Query: React.FC = () => {
     setRawJson(null);
   };
 
+  const API_BASE = (process.env.REACT_APP_API_BASE || "").replace(/\/$/, "");
+
   const performQuery = async (q: string, m: "echo" | "nl") => {
     const current = q.trim();
     if (!current) return;
@@ -65,7 +67,7 @@ const Query: React.FC = () => {
     setSubmitting(true);
     try {
       if (m === "echo") {
-        const res = await fetch("http://localhost:8000/query", {
+        const res = await fetch(`${API_BASE}/query`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: current }),
@@ -91,7 +93,7 @@ const Query: React.FC = () => {
           return next.slice(0, maxHistory);
         });
       } else {
-        const res = await fetch("http://localhost:8000/nl-query", {
+        const res = await fetch(`${API_BASE}/nl-query`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ question: current }),

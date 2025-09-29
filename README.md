@@ -136,6 +136,16 @@ npm start
 
 Open http://localhost:3000 and use the Query page.
 
+### Deploying Frontend (e.g. Vercel)
+
+Set an environment variable `REACT_APP_API_BASE` to the fully qualified backend base URL (no trailing slash), for example:
+
+```
+REACT_APP_API_BASE=https://cfg-evals-backend.onrender.com
+```
+
+The UI will call `${REACT_APP_API_BASE}/query` and `${REACT_APP_API_BASE}/nl-query`. If the variable is unset it falls back to relative paths (useful when reverse‑proxying both under same domain). After updating env vars on Vercel, trigger a redeploy for them to take effect.
+
 The UI includes:
 
 - Mode toggle (Echo vs NL→SQL)
