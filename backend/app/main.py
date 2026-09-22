@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional
 from .config import get_settings
-from .services.nl_to_sql import nl_to_sql, LLMQuotaExceeded
+from .services.nl_to_sql import nl_to_sql, validate_sql, LLMQuotaExceeded
 from .services.clickhouse_client import execute_sql
 
 """Auth endpoint removed: no authentication required now."""
@@ -18,12 +18,12 @@ logging.basicConfig(
 logger = logging.getLogger("cfg_evals")
 
 app = FastAPI(title="cfg_evals Backend", version="0.1.0")
+settings = get_settings()
 
-# Allow local dev frontend (adjust origins as needed)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten later
-    allow_credentials=True,
+    allow_origins=settings.allowed_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -70,12 +70,12 @@ async def submit_query(payload: QueryRequest):
     )
 
 
-@app.post("/nl-query", response_model=NLQueryResponse, summary="Natural language to SQL using CFG + GPT-5")
+@app.post("/nl-query", response_model=NLQueryResponse, summary="Natural language to schema-guided SQL")
 async def natural_language_query(req: NLQueryRequest):
-    settings = get_settings()
     logger.info("/nl-query received", extra={"question": req.question[:160]})
     try:
         sql, mocked_translation = nl_to_sql(req.question)
+        sql = validate_sql(sql)
         logger.debug("Translation produced SQL", extra={"sql": sql})
     except LLMQuotaExceeded as qe:
         logger.warning("LLM quota exceeded", extra={"error": str(qe)})
@@ -83,10 +83,6 @@ async def natural_language_query(req: NLQueryRequest):
     except Exception as e:
         logger.exception("Translation failed")
         raise HTTPException(status_code=500, detail=f"Translation failed: {e}")
-
-    # Basic safety: prevent non-select
-    if not sql.lower().strip().startswith("select"):
-        raise HTTPException(status_code=400, detail="Generated SQL not allowed (must be SELECT)")
 
     try:
         rows = execute_sql(sql)

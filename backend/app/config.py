@@ -14,9 +14,15 @@ class Settings(BaseModel):
     clickhouse_database: str | None = None
     clickhouse_secure: bool = Field(default=False, description="Use TLS (ClickHouse Cloud)")
     clickhouse_ca_cert: str | None = Field(default=None, description="Optional path to CA cert for ClickHouse Cloud")
+    allowed_origins: list[str] = Field(default=["http://localhost:3000"])
 
 @lru_cache
 def get_settings() -> Settings:
+    origins = [
+        origin.strip()
+        for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+        if origin.strip()
+    ]
     return Settings(
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5"),
@@ -26,6 +32,7 @@ def get_settings() -> Settings:
         clickhouse_user=os.getenv("CLICKHOUSE_USER"),
         clickhouse_password=os.getenv("CLICKHOUSE_PASSWORD"),
         clickhouse_database=os.getenv("CLICKHOUSE_DATABASE"),
-    clickhouse_secure=os.getenv("CLICKHOUSE_SECURE", "false").lower() in {"1", "true", "yes"},
-    clickhouse_ca_cert=os.getenv("CLICKHOUSE_CA_CERT"),
+        clickhouse_secure=os.getenv("CLICKHOUSE_SECURE", "false").lower() in {"1", "true", "yes"},
+        clickhouse_ca_cert=os.getenv("CLICKHOUSE_CA_CERT"),
+        allowed_origins=origins,
     )
