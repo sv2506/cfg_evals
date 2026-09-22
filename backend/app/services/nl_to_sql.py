@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import re
 from pathlib import Path
 from typing import Tuple
 from app.config import get_settings
@@ -11,7 +12,33 @@ INSTRUCTION = """You are a translator that converts natural language analytics r
 
 def load_grammar_text(path: str) -> str:
     p = Path(path)
+    if not p.is_absolute():
+        backend_root = Path(__file__).resolve().parents[2]
+        p = backend_root / path
     return p.read_text(encoding="utf-8")
+
+
+def validate_sql(candidate: str) -> str:
+    """Apply a deliberately small allowlist before a query reaches ClickHouse.
+
+    This is defense in depth for the prototype, not a substitute for a SQL parser,
+    database permissions, query budgets, and sandboxing in a production system.
+    """
+    sql = candidate.strip().rstrip(";").strip()
+    lowered = f" {sql.lower()} "
+    if not re.match(r"^select\s", sql, re.IGNORECASE):
+        raise ValueError("Only SELECT statements are allowed")
+    if ";" in sql or "--" in sql or "/*" in sql:
+        raise ValueError("Multiple statements and SQL comments are not allowed")
+    if not re.search(r"\b(?:default\.)?mock_data\b", sql, re.IGNORECASE):
+        raise ValueError("Query must reference default.MOCK_DATA")
+    forbidden = (
+        "insert", "update", "delete", "drop", "alter", "truncate",
+        "optimize", "attach", "detach", "rename", "grant", "revoke", "join",
+    )
+    if any(re.search(rf"\b{keyword}\b", lowered) for keyword in forbidden):
+        raise ValueError("Disallowed SQL keyword detected")
+    return sql
 
 def mock_translate(nl: str) -> str:
     """Heuristic NL -> SQL for the MOCK_DATA table matching our restricted grammar.
@@ -22,6 +49,13 @@ def mock_translate(nl: str) -> str:
       - Uses allowed aggregates / columns
     """
     q = nl.lower()
+
+    # More specific counting intents must run before the generic count rule.
+    if ("active" in q and ("users" in q or "user" in q)) or "active user" in q:
+        return "SELECT count(*) FROM default.MOCK_DATA WHERE is_active = true"
+
+    if ("count" in q or "number" in q) and "country" in q and ("per" in q or "by" in q):
+        return "SELECT country, count(*) AS cnt FROM default.MOCK_DATA GROUP BY country ORDER BY cnt DESC"
 
     # Count users
     if ("count" in q or "how many" in q) and ("user" in q or "record" in q or "rows" in q or "entries" in q):
@@ -34,7 +68,6 @@ def mock_translate(nl: str) -> str:
     # Sum / total balance
     if ("sum" in q or "total" in q) and ("balance" in q or "balances" in q):
         # Normalize time window phrases to ClickHouse syntax using subtractHours/Days(now())
-        import re
         # Match 'last N hours' or 'last N days'
         m = re.search(r"last\s+(\d{1,3})\s+(hour|hours|day|days)", q)
         if m:
@@ -46,17 +79,7 @@ def mock_translate(nl: str) -> str:
                 return f"SELECT sum(balance) FROM default.MOCK_DATA WHERE signup_date >= subtractDays(now(), {n})"
         return "SELECT sum(balance) FROM default.MOCK_DATA"
 
-    # Active users count
-    if ("active" in q and ("users" in q or "user" in q)) or "active user" in q:
-        return "SELECT count(*) FROM default.MOCK_DATA WHERE is_active = true"
-
-    # Group by country counts
-    if ("count" in q or "number" in q) and "country" in q and ("per" in q or "by" in q):
-        return "SELECT country, count(*) AS cnt FROM default.MOCK_DATA GROUP BY country ORDER BY cnt DESC"
-
     # Pattern-related heuristics
-    import re
-
     # Name starts with letter pattern
     m = re.search(r"name\s+(starts|starting|begins)\s+with\s+([a-z])", q)
     if m:
@@ -98,7 +121,7 @@ def mock_translate(nl: str) -> str:
     m = re.search(r"(subscription\s+plan|plan)(\s+(is|=))?\s+([a-z]+)", q)
     if m:
         plan = m.group(4)
-        return f"SELECT * FROM default.MOCK_DATA WHERE subscription_plane = '{plan}'"
+        return f"SELECT * FROM default.MOCK_DATA WHERE subscription_plan = '{plan}'"
 
     # Email domain queries: emails with domain gmail.com
     m = re.search(r"email(s)?\s+(with|having)?\s*domain\s+([a-z0-9\.-]+)", q)
@@ -119,7 +142,7 @@ def mock_translate(nl: str) -> str:
 
     # Average balance by subscription plan
     if ("average" in q or "avg" in q) and ("balance" in q) and ("plan" in q or "subscription" in q):
-        return "SELECT subscription_plane, avg(balance) AS avg_balance FROM default.MOCK_DATA GROUP BY subscription_plane ORDER BY avg_balance DESC"
+        return "SELECT subscription_plan, avg(balance) AS avg_balance FROM default.MOCK_DATA GROUP BY subscription_plan ORDER BY avg_balance DESC"
 
     # Fallback
     return "SELECT count(*) FROM default.MOCK_DATA"
@@ -148,18 +171,6 @@ def nl_to_sql(nl_query: str) -> Tuple[str, bool]:
             + "\nYou MUST conform to this restricted SQL grammar (subset shown):\n" + truncated_grammar
             + "\nConstraints: only SELECT, table default.MOCK_DATA, no other tables, no DDL, no JOIN."
         )
-
-        def validate_sql(candidate: str) -> str:
-            c = candidate.strip().rstrip(';')
-            lc = c.lower()
-            if not lc.startswith('select '):
-                raise ValueError('Not a SELECT')
-            if 'mock_data' not in lc:
-                raise ValueError('Missing table reference')
-            forbidden = [' insert ', ' update ', ' delete ', ' drop ', ' alter ', ' truncate ', ' optimize ']
-            if any(f in (' ' + lc + ' ') for f in forbidden):
-                raise ValueError('Disallowed keyword detected')
-            return c
 
         logger.debug(
             "Dispatching LLM request", extra={"system_len": len(system_msg), "query_len": len(nl_query)}

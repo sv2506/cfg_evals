@@ -57,7 +57,7 @@ def test_nl_query_subscription_plan():
     resp = client.post('/nl-query', json={'question': 'List users where subscription plan pro'})
     assert resp.status_code == 200, resp.text
     data = resp.json()
-    assert "subscription_plane = 'pro'" in data['sql'].lower()
+    assert "subscription_plan = 'pro'" in data['sql'].lower()
 
 
 def test_nl_query_limit_top_n():

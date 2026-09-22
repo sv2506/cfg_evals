@@ -1,4 +1,8 @@
 {"id": "count_users", "question": "Count all users", "expect_sql_regex": "^SELECT\\s+count\\(\\*\\)\\s+FROM\\s+(default\\.)?MOCK_DATA"}
 {"id": "sum_balance_last_24_hours", "question": "Sum the total balance for all users in the last 24 hours", "expect_sql_regex": "SELECT\\s+sum\\(balance\\).*MOCK_DATA"}
 {"id": "avg_age", "question": "What is the average age of users?", "expect_sql_regex": "SELECT\\s+avg\\(age\\).*MOCK_DATA"}
-{"id": "sum_balance_last_30_hours", "question": "Sum total balance in the last 30 hours", "expect_sql_regex": "SELECT\\s+sum\\(balance\\).*subtractHours\\(now\(\),\\s*30\)"}
+{"id": "sum_balance_last_30_hours", "question": "Sum total balance in the last 30 hours", "expect_sql_regex": "SELECT\\s+sum\\(balance\\).*subtractHours\\(now\\(\\),\\s*30\\)"}
+{"id": "active_users", "question": "How many active users are there?", "expect_sql_regex": "SELECT\\s+count\\(\\*\\).*WHERE\\s+is_active\\s*=\\s*true"}
+{"id": "country_breakdown", "question": "Count users by country", "expect_sql_regex": "SELECT\\s+country,\\s*count\\(\\*\\).*GROUP BY\\s+country"}
+{"id": "subscription_filter", "question": "List users where subscription plan pro", "expect_sql_regex": "WHERE\\s+subscription_plan\\s*=\\s*'pro'"}
+{"id": "row_limit", "question": "Show the first 5 users", "expect_sql_regex": "LIMIT\\s+5$"}

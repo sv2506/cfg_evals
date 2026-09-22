@@ -1,269 +1,154 @@
-# cfg_evals
+# QueryGuard
 
-Experimental NL → SQL (ClickHouse) pipeline using GPT-5 Context Free Grammar (CFG) constraints.
+QueryGuard is a full-stack natural-language analytics prototype. It translates a question into a deliberately restricted subset of ClickHouse SQL, validates the generated statement against an allowlist, executes it, and returns the SQL beside the result set for inspection.
 
-## Features
+The repository makes the uncertain parts of an LLM-backed workflow visible: generated output, validation, deterministic fallback behavior, evaluation cases, and execution mode are all explicit.
 
-- FastAPI backend with two paths:
-  - `POST /query` simple echo (baseline)
-  - `POST /nl-query` natural language → constrained SQL → (mock) ClickHouse rows
-- Constrained grammar (`app/grammars/clickhouse_sql.bnf`) limiting output to a safe SELECT subset
-- Mock mode (default) – no real OpenAI or ClickHouse credentials required
-- Deterministic heuristic fallback translation when API key absent
-- Minimal React UI: toggle between Echo + CFG NL→SQL modes, view generated SQL + JSON rows
-- Autocomplete (client): inline suggestion list while typing (Arrow / Tab / Enter) limited to top 5 matches from curated examples + session history
-- Lightweight eval harness (`backend/evals/run_evals.py`) over 3+ test cases
+> **Scope:** this is a portfolio prototype, not a production SQL security boundary. The grammar is supplied as model guidance and the result is validated in application code; the model is **not** constrained with native grammar decoding.
 
-## Directory Highlights
+## What it demonstrates
 
-```
-backend/
-  app/
-    main.py                 # FastAPI app + /nl-query
-    config.py               # Settings + mock mode
-    grammars/clickhouse_sql.bnf
-    services/
-      nl_to_sql.py          # NL → SQL (mock or OpenAI)
-      clickhouse_client.py  # Mock data executor
-  tests/
-    test_nl_query.py
-  evals/
-    dataset.jsonl
-    run_evals.py
-client/
-  src/pages/Query.tsx       # UI with mode toggle
+- End-to-end ownership across React, FastAPI, model integration, and deployment
+- Natural-language-to-SQL generation with a narrow schema and table allowlist
+- Read-only validation before database execution
+- A deterministic offline mode for demos, tests, and graceful degradation
+- A JSONL evaluation harness with CI-friendly exit codes
+- ClickHouse connectivity for local Docker and hosted environments
+- Query history, autocomplete, generated SQL, and raw-result inspection
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A["Natural-language question"] --> B["Model or deterministic translator"]
+    B --> C["SQL allowlist validation"]
+    C --> D["ClickHouse or mock executor"]
+    D --> E["Inspectable result UI"]
+    F["JSONL evaluation set"] --> B
 ```
 
-## Environment Variables
+## Safety model
 
-| Variable              | Purpose                                                      | Default |
-| --------------------- | ------------------------------------------------------------ | ------- |
-| `OPENAI_API_KEY`      | Real GPT-5 access (optional in mock)                         | None    |
-| `OPENAI_MODEL`        | Model name                                                   | `gpt-5` |
-| `MOCK_MODE`           | Force mock path (`true/false`)                               | `true`  |
-| `CLICKHOUSE_HOST`     | ClickHouse hostname (Docker: `localhost`)                    | None    |
-| `CLICKHOUSE_PORT`     | HTTP port (native container default 8123)                    | None    |
-| `CLICKHOUSE_DATABASE` | Database/schema name (e.g. `default`)                        | None    |
-| `CLICKHOUSE_USER`     | Username (optional; often `default` locally)                 | None    |
-| `CLICKHOUSE_PASSWORD` | Password (optional; set for secured/cloud instances)         | None    |
-| `CLICKHOUSE_SECURE`   | `true` to enable TLS (ClickHouse Cloud / HTTPS)              | `false` |
-| `CLICKHOUSE_CA_CERT`  | Path to CA certificate file (only if custom CA / enterprise) | None    |
+QueryGuard uses several intentionally simple layers:
 
-Minimum for local non‑secure Docker: `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_DATABASE`, and `MOCK_MODE=false`.
+1. The prompt describes a restricted SQL grammar and one permitted table.
+2. The application accepts only a single `SELECT` statement.
+3. Comments, joins, additional tables, and mutation/administrative keywords are rejected.
+4. The database connection should still use a read-only, least-privilege account.
 
-For ClickHouse Cloud also set: `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_SECURE=true` (and optionally `CLICKHOUSE_CA_CERT`).
+For a production system, add an AST-based parser, database-enforced permissions, query time and row limits, audit logging, and isolated execution.
 
-Set `MOCK_MODE=false` and provide `OPENAI_API_KEY` to exercise real grammar calls (parameter name `grammar` assumed; adjust when official SDK confirms interface).
+## Stack
 
-## Grammar
+| Layer | Technology |
+| --- | --- |
+| Interface | React, TypeScript |
+| API | FastAPI, Pydantic |
+| Model integration | OpenAI Python SDK |
+| Data | ClickHouse |
+| Quality | Pytest, JSONL evaluations, GitHub Actions |
+| Deployment | Docker, Render-compatible blueprint |
 
-Located at `backend/app/grammars/clickhouse_sql.bnf` – restricts to:
+## Run locally
 
-- `SELECT` only
-- Aggregates: count, sum, avg, min, max
-- Simple WHERE equality or BETWEEN time filters
-- Optional GROUP BY, LIMIT
-- Basic relative time pattern (prototype)
+### Offline demo mode
 
-## Running Backend
+No API key or database is required.
 
-### Option A: Mock Mode (no ClickHouse / no OpenAI key)
-
-```
-cd backend
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-export MOCK_MODE=true
-uvicorn app.main:app --reload --port 8000
-```
-
-### Option B: Real ClickHouse (load provided CSV) + (optional) OpenAI
-
-1. Start local ClickHouse via Docker:
-
-```
-docker run -d --name ch -p 8123:8123 -p 9000:9000 clickhouse/clickhouse-server:latest
-```
-
-2. Wait a few seconds for startup.
-3. Create table (matches grammar expectations). Note: CSV header uses `subscription_plan` while earlier examples showed `subscription_plane` (typo). Use the schema below:
-
-```
-docker exec -i ch clickhouse-client --query "CREATE TABLE IF NOT EXISTS default.MOCK_DATA (\n  id UInt32,\n  name String,\n  email String,\n  age Int64,\n  signup_date DateTime,\n  country String,\n  is_active Bool,\n  subscription_plan String,\n  last_login DateTime,\n  balance Int64\n) ENGINE=MergeTree ORDER BY id;"
-```
-
-4. Load sample CSV (`sample_files/MOCK_DATA.csv`). This CSV contains realistic rows for development & testing.
-
-```
-docker exec -i ch bash -c "cat > /tmp/MOCK_DATA.csv" < sample_files/MOCK_DATA.csv
-docker exec -i ch clickhouse-client --query "INSERT INTO default.MOCK_DATA FORMAT CSVWithNames" < sample_files/MOCK_DATA.csv
-```
-
-5. (Optional) Verify row count:
-
-```
-docker exec -it ch clickhouse-client --query "SELECT count() FROM default.MOCK_DATA"
-```
-
-6. Run backend pointing at ClickHouse:
-
-```
+```bash
 cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-export CLICKHOUSE_HOST=localhost
-export CLICKHOUSE_PORT=8123
-export CLICKHOUSE_DATABASE=default
-export MOCK_MODE=false
-# Optional (only if you have model access): export OPENAI_API_KEY=sk-...; export OPENAI_MODEL=gpt-5
-uvicorn app.main:app --reload --port 8000
+MOCK_MODE=true uvicorn app.main:app --reload --port 8000
 ```
 
-Backend now serves:
+In another terminal:
 
-- http://localhost:8000/health
-- http://localhost:8000/nl-query
-
-## Running Frontend
-
-```
+```bash
 cd client
-npm install
+npm ci
 npm start
 ```
 
-Open http://localhost:3000 and use the Query page.
+Open `http://localhost:3000`.
 
-### Deploying Frontend (e.g. Vercel)
+### Model and database mode
 
-Set an environment variable `REACT_APP_API_BASE` to the fully qualified backend base URL (no trailing slash), for example:
+Copy `.env.example`, configure a read-only ClickHouse user, then set:
 
-```
-REACT_APP_API_BASE=https://cfg-evals-backend.onrender.com
-```
-
-The UI will call `${REACT_APP_API_BASE}/query` and `${REACT_APP_API_BASE}/nl-query`. If the variable is unset it falls back to relative paths (useful when reverse‑proxying both under same domain). After updating env vars on Vercel, trigger a redeploy for them to take effect.
-
-The UI includes:
-
-- Mode toggle (Echo vs NL→SQL)
-- Generated SQL + results (when NL mode)
-- Raw API response block
-- Collapsible session Query History (button on right). Each history item can expand to show details and provides:
-  - Run Again (auto executes immediately)
-  - Load Only (populate textarea but keep cleared results)
-  - Collapse
-
-## API Examples (Mock Mode)
-
-Example natural language queries mapped to `default.MOCK_DATA`:
-
-| Natural Language                         | Example Generated SQL                                                                      |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------ |
-| "Count all users"                        | `SELECT count(*) FROM default.MOCK_DATA`                                                   |
-| "Sum total balance in the last 30 hours" | `SELECT sum(balance) FROM default.MOCK_DATA WHERE signup_date >= subtractHours(now(), 30)` |
-| "Find users whose name contains ali"     | `SELECT * FROM default.MOCK_DATA WHERE name ILIKE '%ali%'`                                 |
-
-Example request:
-
-```
-curl -s -X POST localhost:8000/nl-query \
-  -H 'Content-Type: application/json' \
-  -d '{"question":"Sum total balance in the last 30 hours"}' | jq
+```bash
+export MOCK_MODE=false
+export OPENAI_API_KEY=...
+export CLICKHOUSE_HOST=localhost
+export CLICKHOUSE_PORT=8123
+export CLICKHOUSE_DATABASE=default
 ```
 
-Example response (mock):
+The included `sample_files/MOCK_DATA.csv` and `backend/scripts/init_clickhouse.py` can initialize the example schema.
+
+## API
+
+`POST /nl-query`
+
+```json
+{
+  "question": "Sum the total balance for users from the last 30 hours"
+}
+```
+
+Example response in offline mode:
 
 ```json
 {
   "sql": "SELECT sum(balance) FROM default.MOCK_DATA WHERE signup_date >= subtractHours(now(), 30)",
-  "rows": [{ "sum": 5200 }],
+  "rows": [{ "sum": 505 }],
   "mocked": true,
   "warning": "Mock mode enabled: using heuristic translation + sample data"
 }
 ```
 
-## Evals
+Interactive API documentation is available at `http://localhost:8000/docs`.
 
-Dataset: `backend/evals/dataset.jsonl` (JSONL lines with regex expectations). Run:
+## Tests and evaluations
 
-```
+```bash
 cd backend
+pytest -q
 python -m evals.run_evals
 ```
 
-Output JSON summary:
+The unit tests cover request validation, translation behavior, and unsafe SQL rejection. The evaluation runner checks generated SQL against expected patterns and exits non-zero on regression.
 
-```json
-{
-  "summary": {"total": 3, "passed": 3, "failed": 0},
-  "results": [ ... ]
-}
-```
+## Configuration
 
-Exit code non‑zero if any fail (CI friendly).
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `MOCK_MODE` | Use the deterministic translator and in-memory results | `true` |
+| `OPENAI_API_KEY` | Enable model-backed translation | unset |
+| `OPENAI_MODEL` | Model used for translation | `gpt-5` |
+| `CLICKHOUSE_HOST` | Database host | unset |
+| `CLICKHOUSE_PORT` | HTTP interface port | unset |
+| `CLICKHOUSE_DATABASE` | Database name | unset |
+| `CLICKHOUSE_USER` | Read-only database user | `default` |
+| `CLICKHOUSE_PASSWORD` | Database password | unset |
+| `CLICKHOUSE_SECURE` | Enable TLS | `false` |
+| `ALLOWED_ORIGINS` | Comma-separated frontend origins | `http://localhost:3000` |
 
-## Testing
+## Deliberate limitations
 
-```
-cd backend
-pytest -q
-```
+- The grammar guides generation but is not enforced during token decoding.
+- The heuristic fallback covers a small set of example intents.
+- The evaluation dataset is intentionally compact and should grow with the grammar.
+- Authentication, rate limiting, model-cost telemetry, and persistent evaluation history are not included.
 
-## Extending
+## Next steps
 
-- Add more grammar production rules for JOINs after auditing safety.
-- Introduce caching layer for repeated NL queries.
-- Add latency + token metrics collection.
-- Persist evaluation history.
+- Replace string validation with a SQL AST allowlist
+- Track latency, token usage, validation failures, and fallback rate
+- Expand evaluations with adversarial and ambiguous questions
+- Add human approval for expensive or unusually broad queries
 
-## Deployment Notes
+## License
 
-### Docker (Backend)
-
-Create image:
-
-```
-docker build -t cfg-evals-backend -f backend/Dockerfile .
-```
-
-Run (mock mode):
-
-```
-docker run -p 8000:8000 cfg-evals-backend
-```
-
-Run (real LLM + ClickHouse Cloud):
-
-```
-docker run -p 8000:8000 \
-  -e OPENAI_API_KEY=$OPENAI_API_KEY \
-  -e OPENAI_MODEL=gpt-5 \
-  -e MOCK_MODE=false \
-  -e CLICKHOUSE_HOST=$CLICKHOUSE_HOST \
-  -e CLICKHOUSE_PORT=$CLICKHOUSE_PORT \
-  -e CLICKHOUSE_USER=$CLICKHOUSE_USER \
-  -e CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASSWORD \
-  -e CLICKHOUSE_DATABASE=default \
-  -e CLICKHOUSE_SECURE=true \
-  cfg-evals-backend
-```
-
-### Compose
-
-See `docker-compose.yml` for combined service configuration (after added).
-
-### Production Guidance
-
-- Run behind a reverse proxy with TLS termination.
-- Set `temperature=1` for deterministic SQL.
-- Log (NL query, generated SQL, latency) excluding PII.
-- If model call fails, return 503; do not silently degrade to mock.
-- Pin dependency versions (already in `requirements.txt`).
-- Periodically re-run evals and diff SQL outputs.
-
-### CSV Source Attribution
-
-`sample_files/MOCK_DATA.csv` is synthetic demo data generated for this project (no real user information). Feel free to replace with your own dataset; update the grammar/table schema accordingly if you add columns.
+MIT

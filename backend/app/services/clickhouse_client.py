@@ -4,9 +4,9 @@ from functools import lru_cache
 from app.config import get_settings
 
 SAMPLE_ROWS = [
-    {"order_id": 1, "amount": 120.50, "created_at": "2025-09-27T10:00:00"},
-    {"order_id": 2, "amount": 75.00, "created_at": "2025-09-27T18:30:00"},
-    {"order_id": 3, "amount": 310.10, "created_at": "2025-09-28T02:15:00"},
+    {"id": 1, "name": "Alice Chen", "email": "alice@example.com", "age": 31, "country": "US", "is_active": True, "subscription_plan": "pro", "balance": 120},
+    {"id": 2, "name": "Bruno Silva", "email": "bruno@example.com", "age": 27, "country": "BR", "is_active": True, "subscription_plan": "team", "balance": 75},
+    {"id": 3, "name": "Chandra Rao", "email": "chandra@example.com", "age": 38, "country": "IN", "is_active": False, "subscription_plan": "free", "balance": 310},
 ]
 
 @lru_cache
@@ -49,17 +49,25 @@ def _safety_check(sql: str) -> Optional[str]:
 def execute_sql(sql: str) -> List[Dict[str, Any]]:
     settings = get_settings()
     if settings.mock_mode:
-        # Return filtered or aggregated mock results based on trivial patterns
-        # NOTE: These sample rows still reflect legacy 'orders' shape; left for simple testing.
+        # Return representative data without requiring external services.
         l = sql.lower()
+        if "group by country" in l:
+            return [{"country": country, "cnt": sum(row["country"] == country for row in SAMPLE_ROWS)} for country in sorted({row["country"] for row in SAMPLE_ROWS})]
         if l.startswith("select count"):
+            if "where is_active = true" in l:
+                return [{"count": sum(row["is_active"] for row in SAMPLE_ROWS)}]
             return [{"count": len(SAMPLE_ROWS)}]
         if l.startswith("select sum"):
-            total = sum(r["amount"] for r in SAMPLE_ROWS)
+            total = sum(r["balance"] for r in SAMPLE_ROWS)
             return [{"sum": round(total, 2)}]
         if l.startswith("select avg"):
-            total = sum(r["amount"] for r in SAMPLE_ROWS)
-            return [{"avg": round(total / len(SAMPLE_ROWS), 2)}]
+            if "age" in l:
+                return [{"avg": round(sum(r["age"] for r in SAMPLE_ROWS) / len(SAMPLE_ROWS), 2)}]
+            return [{"avg": round(sum(r["balance"] for r in SAMPLE_ROWS) / len(SAMPLE_ROWS), 2)}]
+        if "subscription_plan = 'pro'" in l:
+            return [row for row in SAMPLE_ROWS if row["subscription_plan"] == "pro"]
+        if "country = 'us'" in l:
+            return [row for row in SAMPLE_ROWS if row["country"] == "US"]
         return SAMPLE_ROWS
 
     # Real execution path
